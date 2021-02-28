@@ -15,6 +15,15 @@ import argcomplete
 import torch
 import numpy as np
 
+from ntm.aio import EncapsulatedNTM
+
+torch.cuda.is_available = lambda: False
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Device: ", device)
+
+if torch.cuda.is_available():
+    torch.backends.cudnn.benchmark = True
+    torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 LOGGER = logging.getLogger(__name__)
 
@@ -100,7 +109,7 @@ def train_batch(net, criterion, optimizer, X, Y):
 
     # Feed the sequence + delimiter
     for i in range(inp_seq_len):
-        net(X[i])
+        net(X[i].to(device))
 
     # Read the output (no input given)
     y_out = torch.zeros(Y.size())
@@ -112,16 +121,17 @@ def train_batch(net, criterion, optimizer, X, Y):
     clip_grads(net)
     optimizer.step()
 
-    y_out_binarized = y_out.clone().data
+    # apply can only be done in cpu tensors
+    y_out_binarized = y_out.clone().data.cpu()
     y_out_binarized.apply_(lambda x: 0 if x < 0.5 else 1)
 
     # The cost is the number of error bits per sequence
-    cost = torch.sum(torch.abs(y_out_binarized - Y.data))
+    cost = torch.sum(torch.abs(y_out_binarized - Y.data.cpu()))
 
     return loss.item(), cost.item() / batch_size
 
 
-def evaluate(net, criterion, X, Y):
+def evaluate(net: EncapsulatedNTM, criterion, X, Y):
     """Evaluate a single batch (without training)."""
     inp_seq_len = X.size(0)
     outp_seq_len, batch_size, _ = Y.size()
@@ -173,7 +183,13 @@ def train_model(model, args):
     start_ms = get_ms()
 
     for batch_num, x, y in model.dataloader:
-        loss, cost = train_batch(model.net, model.criterion, model.optimizer, x, y)
+        if torch.cuda.is_available():
+            x_ = x.cuda()
+            y_ = y.cuda()
+        else:
+            x_ = x
+            y_ = y
+        loss, cost = train_batch(model.net, model.criterion, model.optimizer, x_, y_)
         losses += [loss]
         costs += [cost]
         seq_lengths += [y.size(0)]
@@ -254,6 +270,8 @@ def init_model(args):
     LOGGER.info(params)
 
     model = model_cls(params=params)
+    if torch.cuda.is_available():
+        model.net = model.net.cuda()
     return model
 
 

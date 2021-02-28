@@ -2,15 +2,16 @@
 import torch
 from torch import nn
 from .ntm import NTM
-from .controller import LSTMController
+from .controller import LSTMController, FFNNController
 from .head import NTMReadHead, NTMWriteHead
 from .memory import NTMMemory
 
+FEED_FORWARD_CONTROLLER_TYPE = "ffnn"
 
 class EncapsulatedNTM(nn.Module):
 
     def __init__(self, num_inputs, num_outputs,
-                 controller_size, controller_layers, num_heads, N, M):
+                 controller_size, controller_layers, num_heads, N, M, controller_type=FEED_FORWARD_CONTROLLER_TYPE):
         """Initialize an EncapsulatedNTM.
 
         :param num_inputs: External number of inputs.
@@ -34,7 +35,10 @@ class EncapsulatedNTM(nn.Module):
 
         # Create the NTM components
         memory = NTMMemory(N, M)
-        controller = LSTMController(num_inputs + M*num_heads, controller_size, controller_layers)
+        if controller_type == FEED_FORWARD_CONTROLLER_TYPE:
+            controller = FFNNController(num_inputs + M*num_heads, controller_size, controller_layers)
+        else:
+            controller = LSTMController(num_inputs + M * num_heads, controller_size, controller_layers)
         heads = nn.ModuleList([])
         for i in range(num_heads):
             heads += [
